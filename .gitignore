@@ -3,6 +3,9 @@
 *.a
 *.so
 
+# ignore ctags
+tags
+
 # Folders
 _obj
 _test

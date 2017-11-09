@@ -38,10 +38,10 @@ type keyValueServer struct {
 	connectionChannel chan net.Conn
 	dbRequestChannel chan DBRequest
 	countClientsRequestChannel chan CountClientsRequest
-	deadClient chan Client
+	deadClient chan *Client
 	quitServer chan bool
 	quitListening chan bool
-	clients []Client
+	clients []*Client
 	listener net.Listener
 }
 
@@ -53,7 +53,7 @@ func New() KeyValueServer {
 	ret.countClientsRequestChannel = make(chan CountClientsRequest)
 	ret.quitListening = make(chan bool)
 	ret.quitServer = make(chan bool)
-	ret.clients = make([]Client, 0, 10)
+	ret.clients = make([]*Client, 0, 10)
 
 	return ret
 }
@@ -61,13 +61,16 @@ func New() KeyValueServer {
 func (kvs *keyValueServer) Start(port int) error {
     // TODO: go handler that handles all the request with channels.
 	listener, err := net.Listen("tcp", ":" + strconv.Itoa(port))
+	fmt.Printf("Start server on port: %d\n", port)
 	if err != nil {
 		fmt.Println("keyValueServre.Start: Can't create a listener, error occured")
 		return err
 	}
 	kvs.listener = listener
+	init_db()
 
 	go runServer(kvs)
+	go listenToConnections(kvs)
     return nil
 }
 
@@ -95,7 +98,6 @@ func (kvs *keyValueServer) Count() int {
 
 // TODO: add additional methods/functions below!
 func runServer(kvs *keyValueServer) {
-	go listenToConnections(kvs)
 	for {
 		select {
 
@@ -118,13 +120,13 @@ func runServer(kvs *keyValueServer) {
 		// Handle when there is a new connection.
 		case connection := <-kvs.connectionChannel:
 			fmt.Println("Server got new connection ...")
-			client := Client{connection: connection,
+			client := &Client{connection: connection,
 							bytesChannel: make(chan []byte),
 							quitReadChannel: make(chan bool),
 							quitWriteChannel: make(chan bool)}
 			kvs.clients = append(kvs.clients, client)
-			go read(kvs, &client)
-			go write(&client)
+			go read(kvs, client)
+			go write(client)
 
 		case deadClient := <-kvs.deadClient:
 			for i, client := range(kvs.clients) {
@@ -158,13 +160,13 @@ func runServer(kvs *keyValueServer) {
 
 func listenToConnections(kvs *keyValueServer) {
 	for {
-		connection, err := kvs.listener.Accept()
 		select {
 		case <-kvs.quitListening:
 			fmt.Println("Quit listenting")
 			return
 			
 		default:
+			connection, err := kvs.listener.Accept()
 			if nil == err {
 				// notify server handler thread that there is a new connection.
 				// Pass the new connection back through channel.
@@ -177,24 +179,25 @@ func listenToConnections(kvs *keyValueServer) {
 
 func read(kvs *keyValueServer, client *Client) {
 	// create reader from client.connection
+	bufReader := bufio.NewReader(client.connection)
 	for {
 		select {
 		case <-client.quitReadChannel:
 			fmt.Println("Quiting the read thread")
 			return
 		default:
-			bufReader := bufio.NewReader(client.connection)
 			buffer, err := bufReader.ReadBytes('\n')
-			if err != nil {
-				if err == io.EOF {
-					kvs.deadClient <- *client
-				} else {
-					return
-				}
+
+			if err == io.EOF {
+				kvs.deadClient <- client
+			} else if nil != err {
 				fmt.Printf("Reading error: %v", err)
+				return
+			} else  {
+
+				dbRequest := createDbRequest(buffer)
+				kvs.dbRequestChannel <- dbRequest
 			}
-			dbRequest := createDbRequest(buffer)
-			kvs.dbRequestChannel <- dbRequest
 		}
 	}
 }

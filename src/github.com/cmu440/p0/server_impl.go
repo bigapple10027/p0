@@ -59,8 +59,9 @@ func New() KeyValueServer {
 	ret.connectionChannel = make(chan net.Conn)
 	ret.dbRequestChannel = make(chan *DBRequest)
 	ret.countClientsRequestChannel = make(chan CountClientsRequest)
-	ret.quitListening = make(chan bool)
+	ret.deadClient = make(chan *Client)
 	ret.quitServer = make(chan bool)
+	ret.quitListening = make(chan bool)
 	ret.clients = make([]*Client, 0, 10)
 
 	return ret
